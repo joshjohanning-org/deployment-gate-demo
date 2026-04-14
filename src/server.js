@@ -173,24 +173,48 @@ async function checkPriorEnvironmentDeployment(octokit, owner, repo, priorEnv, h
 // Validate ServiceNow change ticket
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function validateChangeTicket(runId, owner, repo, octokit) {
-  // Try to find the change ticket from workflow run inputs or environment variables
-  // We look at the workflow run to find any inputs that look like a change ticket
+async function validateChangeTicket(runId, owner, repo, octokit, webhookPayload) {
+  // Try to find the change ticket from multiple sources:
+  // 1. The deployment payload (set by the workflow)
+  // 2. The workflow run inputs (if accessible)
   try {
-    const { data: run } = await octokit.rest.actions.getWorkflowRun({
-      owner,
-      repo,
-      run_id: runId,
-    });
+    let ticketNumber = null;
 
-    // Check workflow dispatch inputs for a change_ticket field
-    const inputs = run.inputs || {};
-    const ticketNumber =
-      inputs.change_ticket ||
-      inputs.snow_ticket ||
-      inputs.ticket ||
-      inputs.change_number ||
-      null;
+    // Source 1: Check the deployment payload for a change ticket
+    const deploymentPayload = webhookPayload?.deployment?.payload || {};
+    if (typeof deploymentPayload === 'object') {
+      ticketNumber = deploymentPayload.change_ticket || deploymentPayload.ticket || null;
+    }
+
+    // Source 2: Check the workflow run display_title or head_commit message
+    if (!ticketNumber) {
+      const { data: run } = await octokit.rest.actions.getWorkflowRun({
+        owner,
+        repo,
+        run_id: parseInt(runId),
+      });
+
+      // Check workflow dispatch inputs
+      const inputs = run.inputs || {};
+      ticketNumber =
+        inputs.change_ticket ||
+        inputs.snow_ticket ||
+        inputs.ticket ||
+        inputs.change_number ||
+        null;
+
+      // Also check the display title for a CHG pattern
+      if (!ticketNumber && run.display_title) {
+        const match = run.display_title.match(/CHG\d{7}/);
+        if (match) ticketNumber = match[0];
+      }
+    }
+
+    // Source 3: Check environment variables set in the deployment
+    if (!ticketNumber && webhookPayload?.deployment?.description) {
+      const match = webhookPayload.deployment.description.match(/CHG\d{7}/);
+      if (match) ticketNumber = match[0];
+    }
 
     if (!ticketNumber) {
       return {
@@ -366,7 +390,7 @@ app.post("/webhook", async (req, res) => {
   // ── Check 2: ServiceNow change ticket ──
   if (envConfig.requires_change_ticket) {
     console.log("  Check 2: ServiceNow change ticket validation...");
-    const ticketCheck = await validateChangeTicket(runId, owner, repoName, octokit);
+    const ticketCheck = await validateChangeTicket(runId, owner, repoName, octokit, payload);
     checks.push({ name: "ServiceNow Ticket", ...ticketCheck });
     if (!ticketCheck.passed) allPassed = false;
     console.log(`    ${ticketCheck.passed ? "PASS" : "FAIL"}: ${ticketCheck.message}`);
