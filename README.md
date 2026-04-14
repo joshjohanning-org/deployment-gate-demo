@@ -143,6 +143,50 @@ curl http://localhost:3000/api/servicenow/ticket/INVALID
 | Enforce via code review of workflows | Enforce via environment protection rules |
 | Update 1,500 repos when rules change | Update ONE app when rules change |
 
+## Rollout Strategy
+
+### Phase 1: Deploy the gate app
+Host the gate app somewhere persistent (Azure Web App, VM, container, etc.) and point the GitHub App's webhook URL to it. For testing, use smee.io locally.
+
+### Phase 2: Install the GitHub App org-wide
+Install the app on the org with access to **all repositories**. The app only activates when an environment has the protection rule attached — installing it does nothing by itself.
+
+### Phase 3: Roll out environments + protection rules
+Use the included rollout script to programmatically create environments and attach the gate:
+
+```bash
+# Dry run first — see what would happen
+./scripts/rollout.sh --dry-run my-repo-1 my-repo-2
+
+# Single repo
+./scripts/rollout.sh my-repo
+
+# From a file (one repo name per line)
+./scripts/rollout.sh --file repos.txt
+
+# All repos in the org
+./scripts/rollout.sh --all
+```
+
+The script creates 5 environments per repo (Dev, QA, Staging, Production-East, Production-Central) and attaches the gate to QA, Staging, and Production-*. Production environments also get branch restrictions (only `main` and `v*` tags).
+
+### Phase 4: Communicate to teams
+Teams don't need to change their workflows. They just need to use `environment:` in their deploy jobs (which most already do). The gate fires automatically.
+
+### What the rollout script does per repo:
+
+| Environment | Gate Attached | Branch Restriction | Wait Timer |
+|---|---|---|---|
+| Dev | No | None | No |
+| QA | **Yes** (requires Dev) | None | No |
+| Staging | **Yes** (requires QA) | None | No |
+| Production-East | **Yes** (requires Staging + ticket) | `main` + `v*` tags | 1 min |
+| Production-Central | **Yes** (requires Staging + ticket) | `main` + `v*` tags | 1 min |
+
+### Customizing for your org
+
+Edit the `ENVIRONMENTS` array in `scripts/rollout.sh` to match your environment names. Edit `config.yml` to match the hierarchy and ticket requirements.
+
 ## Links
 
 - [Creating custom deployment protection rules](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-deployments/creating-custom-deployment-protection-rules)
