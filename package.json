@@ -8,10 +8,11 @@
     "dev": "node --watch src/server.js"
   },
   "dependencies": {
+    "dotenv": "^17.4.1",
     "express": "^4.21.0",
-    "jsonwebtoken": "^9.0.2",
     "js-yaml": "^4.1.0",
-    "smee-client": "^2.0.4",
-    "octokit": "^4.1.2"
+    "jsonwebtoken": "^9.0.2",
+    "octokit": "^4.1.2",
+    "smee-client": "^2.0.4"
   }
 }
