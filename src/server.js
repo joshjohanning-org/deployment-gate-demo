@@ -240,19 +240,42 @@ async function validateChangeTicket(runId, owner, repo, octokit) {
 // Respond to GitHub (approve or reject the deployment)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function respondToGitHub(octokit, owner, repo, runId, callbackUrl, state, comment) {
+async function respondToGitHub(octokit, owner, repo, runId, envName, state, comment) {
   try {
     await octokit.request("POST /repos/{owner}/{repo}/actions/runs/{run_id}/deployment_protection_rule", {
       owner,
       repo,
-      run_id: runId,
-      environment_name: "", // filled by GitHub
+      run_id: parseInt(runId),
+      environment_name: envName,
       state,
       comment,
     });
     console.log(`  Response sent: ${state}`);
   } catch (error) {
     console.error(`  Error responding to GitHub: ${error.message}`);
+    // Try the callback URL approach as fallback
+    try {
+      const payload_body = { state, comment, environment_name: envName };
+      const callbackUrl = `https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/deployment_protection_rule`;
+      const token = octokit.auth;
+      const resp = await fetch(callbackUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `token ${typeof token === 'string' ? token : ''}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload_body),
+      });
+      if (resp.ok) {
+        console.log(`  Response sent via fallback: ${state}`);
+      } else {
+        const body = await resp.text();
+        console.error(`  Fallback also failed: ${resp.status} ${body}`);
+      }
+    } catch (e2) {
+      console.error(`  Fallback error: ${e2.message}`);
+    }
   }
 }
 
@@ -314,7 +337,7 @@ app.post("/webhook", async (req, res) => {
   // If this environment isn't in our config, auto-approve
   if (!envConfig) {
     console.log(`  Environment '${environment}' not in config — auto-approving`);
-    await respondToGitHub(octokit, owner, repoName, runId, null, "approved",
+    await respondToGitHub(octokit, owner, repoName, runId, environment, "approved",
       `Environment '${environment}' is not configured in the deployment gate. Auto-approved.`);
     return;
   }
@@ -374,7 +397,7 @@ app.post("/webhook", async (req, res) => {
   console.log(`  Final decision: ${statusEmoji.toUpperCase()}`);
   console.log("═".repeat(60));
 
-  await respondToGitHub(octokit, owner, repoName, runId, null, statusEmoji, comment);
+  await respondToGitHub(octokit, owner, repoName, runId, environment, statusEmoji, comment);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
