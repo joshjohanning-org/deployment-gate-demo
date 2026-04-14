@@ -1,0 +1,17 @@
+{
+  "name": "deployment-gate-demo",
+  "version": "1.0.0",
+  "description": "Custom Deployment Protection Rule - enforces environment promotion and ServiceNow validation",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "js-yaml": "^4.1.0",
+    "smee-client": "^2.0.4",
+    "octokit": "^4.1.2"
+  }
+}

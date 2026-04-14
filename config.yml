@@ -1,0 +1,29 @@
+# Environment promotion hierarchy
+# The gate checks that an artifact was deployed to the required prior environment
+# before allowing promotion to the next one.
+
+environments:
+  Dev:
+    order: 1
+    requires_prior: null
+    requires_change_ticket: false
+
+  QA:
+    order: 2
+    requires_prior: Dev
+    requires_change_ticket: false
+
+  Staging:
+    order: 3
+    requires_prior: QA
+    requires_change_ticket: false
+
+  Production-East:
+    order: 4
+    requires_prior: Staging
+    requires_change_ticket: true
+
+  Production-Central:
+    order: 4
+    requires_prior: Staging
+    requires_change_ticket: true
