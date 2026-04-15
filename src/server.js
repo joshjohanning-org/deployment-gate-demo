@@ -115,53 +115,36 @@ async function checkPriorEnvironmentDeployment(octokit, owner, repo, priorEnv, h
       owner,
       repo,
       environment: priorEnv,
-      per_page: 20,
+      sha: headSha,
+      per_page: 10,
     });
 
     if (deployments.length === 0) {
-      return { passed: false, message: `No deployments found for environment '${priorEnv}'.` };
-    }
-
-    // Check if the current SHA (or any prior deployment) has a successful deployment status
-    for (const deployment of deployments) {
-      // Check if this deployment's SHA matches the current one
-      if (deployment.sha === headSha) {
-        // Verify it has a success status
-        const { data: statuses } = await octokit.rest.repos.listDeploymentStatuses({
-          owner,
-          repo,
-          deployment_id: deployment.id,
-          per_page: 1,
-        });
-        if (statuses.length > 0 && statuses[0].state === "success") {
-          return {
-            passed: true,
-            message: `Found successful deployment of SHA \`${headSha.slice(0, 7)}\` to '${priorEnv}' (deployment #${deployment.id}).`,
-          };
-        }
-      }
-    }
-
-    // If no exact SHA match, check if the environment has ANY successful recent deployment
-    // (more lenient — useful when teams use tags/releases)
-    const latestDeployment = deployments[0];
-    const { data: statuses } = await octokit.rest.repos.listDeploymentStatuses({
-      owner,
-      repo,
-      deployment_id: latestDeployment.id,
-      per_page: 1,
-    });
-
-    if (statuses.length > 0 && statuses[0].state === "success") {
       return {
-        passed: true,
-        message: `Environment '${priorEnv}' has a recent successful deployment (SHA: \`${latestDeployment.sha.slice(0, 7)}\`, deployment #${latestDeployment.id}). Allowing promotion.`,
+        passed: false,
+        message: `No deployment of SHA \`${headSha.slice(0, 7)}\` found in environment '${priorEnv}'. This exact commit/ref must be deployed to '${priorEnv}' before it can be promoted.`,
       };
+    }
+
+    // Check if any of the matching deployments has a success status
+    for (const deployment of deployments) {
+      const { data: statuses } = await octokit.rest.repos.listDeploymentStatuses({
+        owner,
+        repo,
+        deployment_id: deployment.id,
+        per_page: 1,
+      });
+      if (statuses.length > 0 && statuses[0].state === "success") {
+        return {
+          passed: true,
+          message: `Found successful deployment of SHA \`${headSha.slice(0, 7)}\` to '${priorEnv}' (deployment #${deployment.id}).`,
+        };
+      }
     }
 
     return {
       passed: false,
-      message: `No successful deployment found for environment '${priorEnv}'. The artifact must be deployed there first.`,
+      message: `SHA \`${headSha.slice(0, 7)}\` has deployments to '${priorEnv}' but none with a success status. The deployment must complete successfully before promotion.`,
     };
   } catch (error) {
     console.error("Error checking deployments:", error.message);

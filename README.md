@@ -192,3 +192,95 @@ Edit the `ENVIRONMENTS` array in `scripts/rollout.sh` to match your environment 
 - [Creating custom deployment protection rules](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-deployments/creating-custom-deployment-protection-rules)
 - [Configuring custom deployment protection rules](https://docs.github.com/en/actions/deployment/protecting-deployments/configuring-custom-deployment-protection-rules)
 - [Smee.io webhook proxy](https://smee.io)
+
+## FAQ
+
+### Does this require GitHub Releases?
+
+**No.** The gate checks the [GitHub Deployments API](https://docs.github.com/en/rest/deployments/deployments), not releases. Any workflow job that uses `environment: <name>` automatically creates a deployment record tied to that commit SHA. The release-based CD workflow in the demo is just one pattern — teams can use `on: push`, `on: pull_request`, `workflow_dispatch`, or anything else. As long as their deploy job uses `environment:`, the gate works.
+
+### How does the gate know which SHA is being deployed?
+
+The `deployment_protection_rule` webhook payload includes the `deployment.sha` — the exact commit SHA that the workflow is deploying. The gate queries the Deployments API filtered by that SHA:
+
+```
+GET /repos/{owner}/{repo}/deployments?environment={prior_env}&sha={current_sha}
+```
+
+If the prior environment has no successful deployment **for that exact SHA**, the gate rejects. A different SHA deployed to Dev last week won't satisfy the check for a new SHA deploying to QA today.
+
+### Where does the ServiceNow ticket come from?
+
+The gate reads the change ticket from the **workflow run's display title**. The demo uses `run-name:` in the workflow to embed the ticket:
+
+```yaml
+run-name: "Deploy ${{ inputs.release_tag }} to ${{ inputs.environment }} ${{ inputs.change_ticket }}"
+```
+
+The gate scans the display title for a pattern matching `CHG` followed by 7 digits.
+
+### What if a team doesn't add the change_ticket input?
+
+**The deployment to Production gets rejected.** The gate returns:
+
+> *"No ServiceNow change ticket provided. Production deployments require a valid change ticket (e.g., CHG0012345) in the workflow dispatch inputs."*
+
+This is by design — it's self-service enforcement. Teams learn quickly when their first prod deploy fails, and the error message tells them exactly what to add. You can also provide documentation links in the rejection message.
+
+### How can we make ServiceNow validation work without relying on workflow inputs?
+
+Several alternatives:
+- **Commit message scanning** — the gate scans recent commit messages for a CHG pattern
+- **PR body scanning** — if deploying from a merged PR, scan the PR body
+- **Environment variable** — teams set a `CHANGE_TICKET` variable on the Production environment in the UI before deploying
+- **External lookup** — the gate calls ServiceNow's API to check if there's an approved change window for this repo/service right now (no ticket number needed)
+
+### How are environment ordering/hierarchy defined?
+
+The hierarchy is configured in [`config.yml`](config.yml). The gate matches environments by **exact name**. If a team's environment name isn't in the config, the gate **auto-approves** (unknown environment = no restrictions).
+
+### What if a team calls their environments different names?
+
+Three approaches:
+
+**A. Standardize names (simplest):** The rollout script creates the environments *for* teams. If they use `environment: QA`, it hits the gate. If they invent their own name, it won't have the gate attached, so it's ungated — but you can detect this with audit automation.
+
+**B. Per-repo config file (most flexible):** Have teams put an `environments.yml` in their `.github/` folder that maps their custom names to standard classifications:
+
+```yaml
+environments:
+  my-test-env:
+    maps_to: testing
+  pre-prod:
+    maps_to: staging
+  prod-us:
+    maps_to: production
+```
+
+The gate reads this file and maps accordingly.
+
+**C. Fuzzy matching (pragmatic):** The gate pattern-matches: `*prod*` → production rules, `*stag*` or `*uat*` → staging rules, `*qa*` or `*test*` → testing rules. Not perfect but catches 90% of cases.
+
+### What if a team creates their own environment that bypasses the gate?
+
+The gate only fires on environments that have the deployment protection rule attached. If a team creates a rogue `my-prod` environment, it won't have the gate. To catch this:
+
+1. **Audit automation** — periodically scan repos for environments missing the gate and flag/fix them
+2. **Required workflows** — use org-level required workflows to ensure certain checks run
+3. **OIDC claim restrictions** — if deploying to cloud (Azure/AWS), restrict OIDC tokens to only work from approved environments
+
+### Can this work with OIDC / cloud deployments?
+
+Yes. The gate is GitHub-side and fires *before* the workflow job starts. So even if the job would use OIDC to get Azure/AWS credentials, the gate blocks it before OIDC ever executes. You can use both together:
+- **Gate** = "has this SHA been through Dev and QA?"
+- **OIDC** = "does this workflow/environment have permission to access the cloud resource?"
+
+### How do we host this in production (not smee.io)?
+
+Any platform that can run a Node.js app and receive HTTPS webhooks:
+- **Azure Web App** or **Azure Container Instance**
+- **AWS Lambda** (with API Gateway)
+- **A VM or container** on your existing infrastructure
+- **GitHub Codespaces** (for extended demos)
+
+Update the GitHub App's webhook URL from your smee.io URL to the production URL.
