@@ -209,6 +209,14 @@ GET /repos/{owner}/{repo}/deployments?environment={prior_env}&sha={current_sha}
 
 If the prior environment has no successful deployment **for that exact SHA**, the gate rejects. A different SHA deployed to Dev last week won't satisfy the check for a new SHA deploying to QA today.
 
+### Does a failed deployment count?
+
+**No.** The gate checks the deployment **status**, not just whether a deployment exists. If a deployment to QA failed (e.g., a test failed, a step errored out), the gate will reject promotion to Staging with:
+
+> *"SHA `abc1234` has deployments to 'QA' but none with a success status. The deployment must complete successfully before promotion."*
+
+The artifact must have a **successful** deployment to the prior environment before it can be promoted.
+
 ### Where does the ServiceNow ticket come from?
 
 The gate reads the change ticket from the **workflow run's display title**. The demo uses `run-name:` in the workflow to embed the ticket:
